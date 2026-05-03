@@ -1,4 +1,4 @@
-name: Adblock Factory FINAL STABLE
+name: Adblock Factory EXTENDED SAFE
 
 on:
   workflow_dispatch:
@@ -14,68 +14,146 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Fetch + Clean + Build
+      - name: Fetch + Sanitize + Merge
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p scripts rules
+          mkdir -p scripts rules profiles
 
-          fetch() {
-            curl -fL --retry 5 --retry-delay 3 --connect-timeout 20 "$1"
+          fetch() { curl -fsSL --retry 5 --connect-timeout 20 "$1"; }
+
+          fail_if_html() {
+            echo "$1" | grep -qiE "<!doctype html|<html" && exit 1
           }
 
-          is_html() {
-            echo "$1" | grep -qiE "<!doctype html|<html"
-          }
-
+          # =====================
+          # JS 清洗（核心防泄漏）
+          # =====================
           sanitize_js() {
-            # 只去明确风险行为，不破坏逻辑
             sed -E \
-              -e 's/\$httpClient\.(get|post|put|delete)/console.log/g'
+              -e 's/\$httpClient\.(get|post|put|delete)/console.log/g' \
+              -e 's/\bfetch\s*\(/console.log(/g' \
+              -e 's/\baxios\.[a-zA-Z]+\s*\(/console.log(/g'
           }
 
-          ensure_done() {
-            if echo "$1" | grep -q '\$done'; then
-              echo "$1"
-            else
-              echo "(function(){try{$1;\$done({});}catch(e){\$done({});}})();"
-            fi
+          # =====================
+          # 规则统一格式
+          # =====================
+          normalize_rules() {
+            awk '
+              function trim(s){ sub(/^[ \t]+/,"",s); sub(/[ \t]+$/,"",s); return s }
+              {
+                line=trim($0)
+                if (line=="" || line ~ /^!/ || line ~ /^#/) next
+
+                if (line ~ /^(DOMAIN|DOMAIN-SUFFIX|IP-CIDR|IP-CIDR6|GEOIP),/) {
+                  sub(/,(REJECT|DIRECT|PROXY)$/,"",line)
+                  print line; next
+                }
+
+                if (line ~ /^\|\|/) {
+                  gsub(/^\|\|/,"",line); gsub(/\^.*$/,"",line)
+                  print "DOMAIN-SUFFIX," line; next
+                }
+
+                if (line ~ /^[0-9.]+[ \t]+/) {
+                  split(line,a,/[ \t]+/)
+                  print "DOMAIN-SUFFIX," a[2]; next
+                }
+
+                if (line ~ /^[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/) {
+                  print "DOMAIN-SUFFIX," line
+                }
+              }'
           }
 
-          echo "=== YouTube Script ==="
-          yt=$(fetch https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/script/youtube/youtube.js)
-          is_html "$yt" && exit 1
-          yt=$(echo "$yt" | sanitize_js)
-          yt=$(ensure_done "$yt")
-          echo "// built $(date -u)" > scripts/youtube.js
-          echo "$yt" >> scripts/youtube.js
+          # =====================
+          # 1. Script（安全清洗）
+          # =====================
+          echo "=== Script ==="
+          js=$(fetch https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/script/startup/startup.js)
+          fail_if_html "$js"
+          js=$(echo "$js" | sanitize_js)
 
-          echo "=== App Script ==="
-          app=$(fetch https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/script/rewrite/Advertising/Advertising.js)
-          is_html "$app" && exit 1
-          app=$(echo "$app" | sanitize_js)
-          app=$(ensure_done "$app")
-          echo "// built $(date -u)" > scripts/app_ads.js
-          echo "$app" >> scripts/app_ads.js
+          echo "// built $(date -u)" > scripts/startup.js
+          echo "$js" >> scripts/startup.js
 
-          echo "=== Anti-AD Rules ==="
+          # =====================
+          # 2. anti-AD
+          # =====================
+          echo "=== anti-AD ==="
           ad=$(fetch https://raw.githubusercontent.com/privacy-protection-tools/anti-AD/master/anti-ad-surge.txt)
-          is_html "$ad" && exit 1
-          echo "# built $(date -u)" > rules/anti-ad.txt
-          echo "$ad" >> rules/anti-ad.txt
+          fail_if_html "$ad"
+          echo "$ad" | normalize_rules > rules/anti-ad.txt
 
-          echo "=== Hagezi (convert to domain list) ==="
-          hz=$(fetch https://raw.githubusercontent.com/hagezi/dns-blocklists/main/hosts/pro.txt)
-          is_html "$hz" && exit 1
+          # =====================
+          # 3. Hagezi
+          # =====================
+          echo "=== Hagezi ==="
+          hz=$(fetch https://raw.githubusercontent.com/hagezi/dns-blocklists/main/hosts/pro.plus.txt)
+          fail_if_html "$hz"
+          echo "$hz" | normalize_rules > rules/hagezi.txt
 
-          # 转换 hosts → DOMAIN-SUFFIX
-          echo "# built $(date -u)" > rules/hagezi.txt
-          echo "$hz" | awk '/^0.0.0.0/ {print "DOMAIN-SUFFIX,"$2}' >> rules/hagezi.txt
+          # =====================
+          # 4. limbo
+          # =====================
+          echo "=== limbo ==="
+          lm=$(fetch https://raw.githubusercontent.com/limbopro/Adblock4limbo/main/Adblock4limbo.list)
+          fail_if_html "$lm"
+          echo "$lm" | normalize_rules > rules/limbo.txt
+
+          # =====================
+          # 5. AdGuard DNS
+          # =====================
+          echo "=== AdGuard ==="
+          ag=$(fetch https://raw.githubusercontent.com/AdguardTeam/AdGuardSDNSFilter/master/Filters/filter.txt)
+          fail_if_html "$ag"
+          echo "$ag" | normalize_rules > rules/adguard.txt
+
+          # =====================
+          # 6. Johnshall（只抽REJECT）
+          # =====================
+          echo "=== Johnshall ==="
+          jsconf=$(fetch https://raw.githubusercontent.com/Johnshall/Shadowrocket-ADBlock-Rules-Forever/release/sr_cnip.conf)
+          fail_if_html "$jsconf"
+
+          echo "$jsconf" | awk '
+            BEGIN{f=0}
+            /^\[Rule\]/{f=1;next}
+            /^\[/{if(f)exit}
+            f && /REJECT/ {print}
+          ' | normalize_rules > rules/johnshall.txt
+
+          # =====================
+          # 7. 合并去重
+          # =====================
+          echo "=== Merge ==="
+          cat rules/*.txt | sort -u > rules/ads_merged.txt
+
+          # =====================
+          # 8. 生成配置
+          # =====================
+          cat > profiles/final.conf <<EOF
+          [General]
+          dns-server = 1.1.1.1, 8.8.8.8
+
+          [Rule]
+          RULE-SET,https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/rules/ads_merged.txt,REJECT
+          GEOIP,CN,DIRECT
+          FINAL,PROXY
+
+          [Script]
+          startup_clean = type=http-response,pattern=^https?:\/\/.*,requires-body=1,script-path=https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/scripts/startup.js
+
+          [MITM]
+          enable = true
+          hostname = *.youtube.com, youtubei.googleapis.com, *.zhihu.com, api.weibo.cn
+          EOF
 
       - name: Commit
         run: |
           git config user.name "bot"
           git config user.email "bot@users.noreply.github.com"
-          git add scripts rules
-          git commit -m "auto update $(date -u)" || exit 0
+          git add .
+          git commit -m "update $(date -u)" || exit 0
           git push
