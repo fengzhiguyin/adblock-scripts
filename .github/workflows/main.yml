@@ -1,4 +1,4 @@
-name: Adblock Factory EXTENDED SAFE
+name: Adblock Factory (B Mode, Multi-Source, Safe)
 
 on:
   workflow_dispatch:
@@ -14,21 +14,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Fetch + Sanitize + Merge
+      - name: Build (rules + scripts)
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p scripts rules profiles
+          mkdir -p scripts rules
 
-          fetch() { curl -fsSL --retry 5 --connect-timeout 20 "$1"; }
+          fetch() { curl -fsSL --retry 5 --retry-delay 3 --connect-timeout 20 "$1"; }
+          is_html() { echo "$1" | grep -qiE "<!doctype html|<html"; }
 
-          fail_if_html() {
-            echo "$1" | grep -qiE "<!doctype html|<html" && exit 1
-          }
-
-          # =====================
-          # JS 清洗（核心防泄漏）
-          # =====================
+          # ===== JS 清洗（去外联）=====
           sanitize_js() {
             sed -E \
               -e 's/\$httpClient\.(get|post|put|delete)/console.log/g' \
@@ -36,31 +31,36 @@ jobs:
               -e 's/\baxios\.[a-zA-Z]+\s*\(/console.log(/g'
           }
 
-          # =====================
-          # 规则统一格式
-          # =====================
-          normalize_rules() {
+          # ===== 规则统一格式 =====
+          normalize() {
             awk '
               function trim(s){ sub(/^[ \t]+/,"",s); sub(/[ \t]+$/,"",s); return s }
               {
                 line=trim($0)
                 if (line=="" || line ~ /^!/ || line ~ /^#/) next
 
+                # 已是规则
                 if (line ~ /^(DOMAIN|DOMAIN-SUFFIX|IP-CIDR|IP-CIDR6|GEOIP),/) {
-                  sub(/,(REJECT|DIRECT|PROXY)$/,"",line)
+                  sub(/,(REJECT|DIRECT|PROXY|REJECT-TINYGIF)$/,"",line)
                   print line; next
                 }
 
+                # AdGuard: ||example.com^
                 if (line ~ /^\|\|/) {
-                  gsub(/^\|\|/,"",line); gsub(/\^.*$/,"",line)
-                  print "DOMAIN-SUFFIX," line; next
+                  gsub(/^\|\|/,"",line)
+                  gsub(/\^.*$/,"",line)
+                  if (line!="") print "DOMAIN-SUFFIX," line
+                  next
                 }
 
-                if (line ~ /^[0-9.]+[ \t]+/) {
+                # hosts: 0.0.0.0 example.com
+                if (line ~ /^[0-9.]+[ \t]+[A-Za-z0-9.-]+$/) {
                   split(line,a,/[ \t]+/)
-                  print "DOMAIN-SUFFIX," a[2]; next
+                  print "DOMAIN-SUFFIX," a[2]
+                  next
                 }
 
+                # 裸域名
                 if (line ~ /^[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/) {
                   print "DOMAIN-SUFFIX," line
                 }
@@ -68,92 +68,91 @@ jobs:
           }
 
           # =====================
-          # 1. Script（安全清洗）
+          # 多脚本源（带降级）
           # =====================
-          echo "=== Script ==="
-          js=$(fetch https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/script/startup/startup.js)
-          fail_if_html "$js"
-          js=$(echo "$js" | sanitize_js)
+          echo "=== Script sources ==="
 
-          echo "// built $(date -u)" > scripts/startup.js
-          echo "$js" >> scripts/startup.js
+          # 主源：blackmatrix7
+          set +e
+          s1=$(fetch https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/script/startup/startup.js 2>/dev/null)
+          ok1=$?
+          set -e
+
+          # 备源：community（示例，可替换为你信任的其他 JS 源）
+          set +e
+          s2=$(fetch https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/script/advertising/advertising.js 2>/dev/null)
+          ok2=$?
+          set -e
+
+          build_script () {
+            name="$1"
+            content="$2"
+            if [ -z "$content" ] || is_html "$content"; then
+              echo "WARNING: $name fallback"
+              echo '$done({});' > "scripts/$name"
+            else
+              content="$(echo "$content" | sanitize_js)"
+              {
+                echo "// built $(date -u)"
+                echo "$content"
+              } > "scripts/$name"
+            fi
+          }
+
+          build_script "startup.js" "$s1"
+          build_script "app_ads.js" "$s2"
 
           # =====================
-          # 2. anti-AD
+          # 多规则源
           # =====================
-          echo "=== anti-AD ==="
+          echo "=== Rules ==="
+
+          # anti-AD
           ad=$(fetch https://raw.githubusercontent.com/privacy-protection-tools/anti-AD/master/anti-ad-surge.txt)
-          fail_if_html "$ad"
-          echo "$ad" | normalize_rules > rules/anti-ad.txt
+          is_html "$ad" && exit 1
+          echo "$ad" | normalize > rules/anti-ad.txt
 
-          # =====================
-          # 3. Hagezi
-          # =====================
-          echo "=== Hagezi ==="
+          # Hagezi
           hz=$(fetch https://raw.githubusercontent.com/hagezi/dns-blocklists/main/hosts/pro.plus.txt)
-          fail_if_html "$hz"
-          echo "$hz" | normalize_rules > rules/hagezi.txt
+          is_html "$hz" && exit 1
+          echo "$hz" | normalize > rules/hagezi.txt
 
-          # =====================
-          # 4. limbo
-          # =====================
-          echo "=== limbo ==="
+          # limbo
           lm=$(fetch https://raw.githubusercontent.com/limbopro/Adblock4limbo/main/Adblock4limbo.list)
-          fail_if_html "$lm"
-          echo "$lm" | normalize_rules > rules/limbo.txt
+          is_html "$lm" && exit 1
+          echo "$lm" | normalize > rules/limbo.txt
 
-          # =====================
-          # 5. AdGuard DNS
-          # =====================
-          echo "=== AdGuard ==="
-          ag=$(fetch https://raw.githubusercontent.com/AdguardTeam/AdGuardSDNSFilter/master/Filters/filter.txt)
-          fail_if_html "$ag"
-          echo "$ag" | normalize_rules > rules/adguard.txt
-
-          # =====================
-          # 6. Johnshall（只抽REJECT）
-          # =====================
-          echo "=== Johnshall ==="
+          # Johnshall（只取 REJECT）
           jsconf=$(fetch https://raw.githubusercontent.com/Johnshall/Shadowrocket-ADBlock-Rules-Forever/release/sr_cnip.conf)
-          fail_if_html "$jsconf"
+          is_html "$jsconf" && exit 1
 
           echo "$jsconf" | awk '
             BEGIN{f=0}
             /^\[Rule\]/{f=1;next}
             /^\[/{if(f)exit}
             f && /REJECT/ {print}
-          ' | normalize_rules > rules/johnshall.txt
+          ' | normalize > rules/johnshall.txt
 
           # =====================
-          # 7. 合并去重
+          # 合并去重
           # =====================
           echo "=== Merge ==="
           cat rules/*.txt | sort -u > rules/ads_merged.txt
 
           # =====================
-          # 8. 生成配置
+          # 健康检查
           # =====================
-          cat > profiles/final.conf <<EOF
-          [General]
-          dns-server = 1.1.1.1, 8.8.8.8
+          for f in scripts/*.js rules/*.txt; do
+            [ -s "$f" ] || { echo "Empty file: $f"; exit 1; }
+            grep -qiE "<!doctype html|<html" "$f" && { echo "HTML detected in $f"; exit 1; }
+          done
 
-          [Rule]
-          RULE-SET,https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/rules/ads_merged.txt,REJECT
-          GEOIP,CN,DIRECT
-          FINAL,PROXY
-
-          [Script]
-          startup_clean = type=http-response,pattern=^https?:\/\/.*,requires-body=1,script-path=https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/scripts/startup.js
-
-          [MITM]
-          enable = true
-          hostname = *.youtube.com, youtubei.googleapis.com, *.zhihu.com, api.weibo.cn
-          EOF
+          echo "DONE"
 
       - name: Commit
         run: |
           git config user.name "bot"
           git config user.email "bot@users.noreply.github.com"
-          git add .
-          git commit -m "update $(date -u)" || exit 0
+          git add scripts rules
+          git commit -m "update $(date -u +"%Y-%m-%dT%H:%M:%SZ")" || exit 0
           git push
