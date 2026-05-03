@@ -18,12 +18,28 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
           mkdir -p scripts rules
 
-          fetch() { curl -fsSL --retry 5 --retry-delay 3 --connect-timeout 20 "$1"; }
-          is_html() { echo "$1" | grep -qiE "<!doctype html|<html"; }
+          fetch_one() {
+            local url content code
+            for url in "$@"; do
+              set +e
+              content="$(curl -fsSL --retry 5 --retry-delay 3 --connect-timeout 20 "$url" 2>/dev/null)"
+              code=$?
+              set -e
+              if [ "$code" -eq 0 ] && [ -n "$content" ] && ! printf '%s' "$content" | grep -qiE '<!doctype html|<html'; then
+                printf '%s' "$content"
+                return 0
+              fi
+            done
+            return 1
+          }
 
-          # ===== JS 清洗（去外联）=====
+          is_html() {
+            printf '%s' "$1" | grep -qiE '<!doctype html|<html'
+          }
+
           sanitize_js() {
             sed -E \
               -e 's/\$httpClient\.(get|post|put|delete)/console.log/g' \
@@ -31,120 +47,130 @@ jobs:
               -e 's/\baxios\.[a-zA-Z]+\s*\(/console.log(/g'
           }
 
-          # ===== 规则统一格式 =====
-          normalize() {
+          normalize_rules() {
             awk '
               function trim(s){ sub(/^[ \t]+/,"",s); sub(/[ \t]+$/,"",s); return s }
               {
                 line=trim($0)
                 if (line=="" || line ~ /^!/ || line ~ /^#/) next
 
-                # 已是规则
-                if (line ~ /^(DOMAIN|DOMAIN-SUFFIX|IP-CIDR|IP-CIDR6|GEOIP),/) {
+                if (line ~ /^(DOMAIN|DOMAIN-SUFFIX|DOMAIN-KEYWORD|IP-CIDR|IP-CIDR6|GEOIP),/) {
                   sub(/,(REJECT|DIRECT|PROXY|REJECT-TINYGIF)$/,"",line)
-                  print line; next
+                  print line
+                  next
                 }
 
-                # AdGuard: ||example.com^
                 if (line ~ /^\|\|/) {
                   gsub(/^\|\|/,"",line)
                   gsub(/\^.*$/,"",line)
-                  if (line!="") print "DOMAIN-SUFFIX," line
+                  if (line != "") print "DOMAIN-SUFFIX," line
                   next
                 }
 
-                # hosts: 0.0.0.0 example.com
                 if (line ~ /^[0-9.]+[ \t]+[A-Za-z0-9.-]+$/) {
                   split(line,a,/[ \t]+/)
-                  print "DOMAIN-SUFFIX," a[2]
+                  if (a[2] != "") print "DOMAIN-SUFFIX," a[2]
                   next
                 }
 
-                # 裸域名
                 if (line ~ /^[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/) {
                   print "DOMAIN-SUFFIX," line
                 }
               }'
           }
 
-          # =====================
-          # 多脚本源（带降级）
-          # =====================
-          echo "=== Script sources ==="
+          extract_johnshall_rejects() {
+            awk '
+              BEGIN{inrule=0}
+              /^\[Rule\]/{inrule=1; next}
+              /^\[/{if(inrule) exit}
+              inrule {
+                line=$0
+                gsub(/\r/,"",line)
+                sub(/^[ \t]+/,"",line)
+                sub(/[ \t]+$/,"",line)
+                if (line=="" || line ~ /^#/ || line ~ /^!/) next
+                if (line ~ /(REJECT|reject|REJECT-TINYGIF)/) print line
+              }'
+          }
 
-          # 主源：blackmatrix7
-          set +e
-          s1=$(fetch https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/script/startup/startup.js 2>/dev/null)
-          ok1=$?
-          set -e
-
-          # 备源：community（示例，可替换为你信任的其他 JS 源）
-          set +e
-          s2=$(fetch https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/script/advertising/advertising.js 2>/dev/null)
-          ok2=$?
-          set -e
-
-          build_script () {
-            name="$1"
-            content="$2"
-            if [ -z "$content" ] || is_html "$content"; then
-              echo "WARNING: $name fallback"
-              echo '$done({});' > "scripts/$name"
-            else
-              content="$(echo "$content" | sanitize_js)"
+          build_script() {
+            local out="$1"
+            shift
+            local content
+            if content="$(fetch_one "$@")"; then
+              content="$(printf '%s' "$content" | sanitize_js)"
               {
-                echo "// built $(date -u)"
-                echo "$content"
-              } > "scripts/$name"
+                printf '// built at %s\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+                printf '%s\n' "$content"
+              } > "$out"
+            else
+              printf '%s\n' '// fallback safe script' '$done({});' > "$out"
             fi
           }
 
-          build_script "startup.js" "$s1"
-          build_script "app_ads.js" "$s2"
+          echo "=== scripts ==="
+          build_script scripts/startup.js \
+            "https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/script/startup/startup.js" \
+            "https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/script/advertising/advertising.js"
 
-          # =====================
-          # 多规则源
-          # =====================
-          echo "=== Rules ==="
+          build_script scripts/app_ads.js \
+            "https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/script/advertising/advertising.js" \
+            "https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/script/startup/startup.js"
 
-          # anti-AD
-          ad=$(fetch https://raw.githubusercontent.com/privacy-protection-tools/anti-AD/master/anti-ad-surge.txt)
-          is_html "$ad" && exit 1
-          echo "$ad" | normalize > rules/anti-ad.txt
+          echo "=== rules required ==="
+          anti_ad="$(fetch_one https://raw.githubusercontent.com/privacy-protection-tools/anti-AD/master/anti-ad-surge.txt)" || {
+            echo "ERROR: anti-AD unavailable"; exit 1;
+          }
+          printf '%s\n' "$anti_ad" | normalize_rules | awk 'NF && !seen[$0]++' > rules/anti-ad.txt
 
-          # Hagezi
-          hz=$(fetch https://raw.githubusercontent.com/hagezi/dns-blocklists/main/hosts/pro.plus.txt)
-          is_html "$hz" && exit 1
-          echo "$hz" | normalize > rules/hagezi.txt
+          hagezi="$(fetch_one https://raw.githubusercontent.com/hagezi/dns-blocklists/main/hosts/pro.plus.txt)" || {
+            echo "ERROR: Hagezi unavailable"; exit 1;
+          }
+          printf '%s\n' "$hagezi" | normalize_rules | awk 'NF && !seen[$0]++' > rules/hagezi.txt
 
-          # limbo
-          lm=$(fetch https://raw.githubusercontent.com/limbopro/Adblock4limbo/main/Adblock4limbo.list)
-          is_html "$lm" && exit 1
-          echo "$lm" | normalize > rules/limbo.txt
+          echo "=== rules optional ==="
+          if limbo="$(fetch_one https://raw.githubusercontent.com/limbopro/Adblock4limbo/main/Adblock4limbo.list)"; then
+            printf '%s\n' "$limbo" | normalize_rules | awk 'NF && !seen[$0]++' > rules/limbo.txt
+          else
+            : > rules/limbo.txt
+          fi
 
-          # Johnshall（只取 REJECT）
-          jsconf=$(fetch https://raw.githubusercontent.com/Johnshall/Shadowrocket-ADBlock-Rules-Forever/release/sr_cnip.conf)
-          is_html "$jsconf" && exit 1
+          if johnshall="$(fetch_one https://raw.githubusercontent.com/Johnshall/Shadowrocket-ADBlock-Rules-Forever/release/sr_cnip.conf)"; then
+            printf '%s\n' "$johnshall" | extract_johnshall_rejects | normalize_rules | awk 'NF && !seen[$0]++' > rules/johnshall.txt
+          else
+            : > rules/johnshall.txt
+          fi
 
-          echo "$jsconf" | awk '
-            BEGIN{f=0}
-            /^\[Rule\]/{f=1;next}
-            /^\[/{if(f)exit}
-            f && /REJECT/ {print}
-          ' | normalize > rules/johnshall.txt
+          if adguard="$(fetch_one https://raw.githubusercontent.com/AdguardTeam/AdGuardSDNSFilter/master/Filters/filter.txt)"; then
+            printf '%s\n' "$adguard" | normalize_rules | awk 'NF && !seen[$0]++' > rules/adguard.txt
+          else
+            : > rules/adguard.txt
+          fi
 
-          # =====================
-          # 合并去重
-          # =====================
-          echo "=== Merge ==="
-          cat rules/*.txt | sort -u > rules/ads_merged.txt
+          echo "=== merge ==="
+          : > rules/ads_merged.txt
+          for f in rules/*.txt; do
+            [ "$(basename "$f")" = "ads_merged.txt" ] && continue
+            [ -s "$f" ] || continue
+            cat "$f" >> rules/ads_merged.txt
+            printf '\n' >> rules/ads_merged.txt
+          done
+          awk 'NF && !seen[$0]++' rules/ads_merged.txt > rules/ads_merged.tmp
+          mv rules/ads_merged.tmp rules/ads_merged.txt
 
-          # =====================
-          # 健康检查
-          # =====================
+          echo "=== verify ==="
+          [ -s scripts/startup.js ] || exit 1
+          [ -s scripts/app_ads.js ] || exit 1
+          [ -s rules/anti-ad.txt ] || exit 1
+          [ -s rules/hagezi.txt ] || exit 1
+          [ -s rules/ads_merged.txt ] || exit 1
+
           for f in scripts/*.js rules/*.txt; do
-            [ -s "$f" ] || { echo "Empty file: $f"; exit 1; }
-            grep -qiE "<!doctype html|<html" "$f" && { echo "HTML detected in $f"; exit 1; }
+            if grep -qiE '<!doctype html|<html' "$f"; then
+              echo "HTML detected in $f"
+              exit 1
+            fi
           done
 
           echo "DONE"
