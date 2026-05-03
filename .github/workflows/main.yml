@@ -1,4 +1,4 @@
-name: Script Factory (Upstream Sync)
+name: Adblock Factory FINAL
 
 on:
   workflow_dispatch:
@@ -12,69 +12,69 @@ jobs:
       contents: write
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Fetch + Clean + Build
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p scripts
+          mkdir -p scripts rules
 
-          # ===== 外部脚本源（你可以随时换）=====
-          declare -A URLS=(
-            ["youtube.js"]="https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/script/youtube/youtube.js"
-            ["global_ads.js"]="https://raw.githubusercontent.com/privacy-protection-tools/anti-AD/master/anti-ad-surge.txt"
-          )
-
-          download() {
+          fetch() {
             curl -fL --retry 5 --retry-delay 3 --connect-timeout 20 "$1"
           }
 
-          validate_js() {
-            # 不能是HTML
-            if echo "$1" | grep -qiE "<!doctype html|<html|<script"; then
-              return 1
-            fi
-            return 0
+          is_html() {
+            echo "$1" | grep -qiE "<!doctype html|<html"
           }
 
-          clean_script() {
+          sanitize_js() {
             sed -E \
-              -e 's/\$httpClient\.(post|get|put)/console.log/g' \
+              -e 's/\$httpClient\.(get|post|put|delete)/console.log/g' \
               -e 's/fetch\s*\(/console.log(/g' \
-              -e 's/axios\./console.log/g'
+              -e 's/axios\.[a-zA-Z]+\s*\(/console.log(/g'
           }
 
-          for name in "${!URLS[@]}"; do
-            echo "Processing $name"
-            content="$(download "${URLS[$name]}")"
-
-            if ! validate_js "$content"; then
-              echo "ERROR: $name is HTML or invalid"
-              exit 1
+          wrap_done() {
+            if echo "$1" | grep -q '\$done'; then
+              echo "$1"
+            else
+              echo "(function(){try{$1;\$done({});}catch(e){\$done({});}})();"
             fi
+          }
 
-            # ===== 清洗处理 =====
-            content="$(echo "$content" | clean_script)"
+          # ===== 1. YouTube脚本 =====
+          yt=$(fetch https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/script/youtube/youtube.js)
+          is_html "$yt" && exit 1
+          yt=$(echo "$yt" | sanitize_js)
+          yt=$(wrap_done "$yt")
+          echo "// built $(date -u)" > scripts/youtube.js
+          echo "$yt" >> scripts/youtube.js
 
-            # ===== 包装（防止脚本不规范）=====
-            if [[ "$content" != *"\$done"* ]]; then
-              content="(function(){try{${content};\$done({});}catch(e){\$done({});}})();"
-            fi
+          # ===== 2. 通用广告脚本 =====
+          app=$(fetch https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/script/advertising/advertising.js)
+          is_html "$app" && exit 1
+          app=$(echo "$app" | sanitize_js)
+          app=$(wrap_done "$app")
+          echo "// built $(date -u)" > scripts/app_ads.js
+          echo "$app" >> scripts/app_ads.js
 
-            # ===== 写入 =====
-            {
-              echo "// built at $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-              echo "$content"
-            } > "scripts/$name"
+          # ===== 3. 中文规则 =====
+          ad=$(fetch https://raw.githubusercontent.com/privacy-protection-tools/anti-AD/master/anti-ad-surge.txt)
+          is_html "$ad" && exit 1
+          echo "# built $(date -u)" > rules/anti-ad.txt
+          echo "$ad" >> rules/anti-ad.txt
 
-          done
+          # ===== 4. 全球规则 =====
+          hz=$(fetch https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/pro.txt)
+          is_html "$hz" && exit 1
+          echo "# built $(date -u)" > rules/hagezi.txt
+          echo "$hz" >> rules/hagezi.txt
 
       - name: Commit
         run: |
           git config user.name "bot"
           git config user.email "bot@users.noreply.github.com"
-          git add scripts/*
-          git commit -m "sync upstream $(date -u)" || exit 0
+          git add scripts rules
+          git commit -m "auto update $(date -u)" || exit 0
           git push
