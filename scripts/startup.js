@@ -1,4 +1,4 @@
-// built at 2026-05-03T06:11:17Z
+// built at 2026-05-03T16:54:15Z
 const scriptName = "去除APP启动广告";
 const $ = MagicJS(scriptName, "INFO");
 
