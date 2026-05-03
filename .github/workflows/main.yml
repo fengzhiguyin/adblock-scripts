@@ -1,4 +1,4 @@
-name: Adblock Factory FINAL
+name: Adblock Factory FINAL STABLE
 
 on:
   workflow_dispatch:
@@ -29,13 +29,12 @@ jobs:
           }
 
           sanitize_js() {
+            # 只去明确风险行为，不破坏逻辑
             sed -E \
-              -e 's/\$httpClient\.(get|post|put|delete)/console.log/g' \
-              -e 's/fetch\s*\(/console.log(/g' \
-              -e 's/axios\.[a-zA-Z]+\s*\(/console.log(/g'
+              -e 's/\$httpClient\.(get|post|put|delete)/console.log/g'
           }
 
-          wrap_done() {
+          ensure_done() {
             if echo "$1" | grep -q '\$done'; then
               echo "$1"
             else
@@ -43,33 +42,35 @@ jobs:
             fi
           }
 
-          # ===== 1. YouTube脚本 =====
+          echo "=== YouTube Script ==="
           yt=$(fetch https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/script/youtube/youtube.js)
           is_html "$yt" && exit 1
           yt=$(echo "$yt" | sanitize_js)
-          yt=$(wrap_done "$yt")
+          yt=$(ensure_done "$yt")
           echo "// built $(date -u)" > scripts/youtube.js
           echo "$yt" >> scripts/youtube.js
 
-          # ===== 2. 通用广告脚本 =====
-          app=$(fetch https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/script/advertising/advertising.js)
+          echo "=== App Script ==="
+          app=$(fetch https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/script/rewrite/Advertising/Advertising.js)
           is_html "$app" && exit 1
           app=$(echo "$app" | sanitize_js)
-          app=$(wrap_done "$app")
+          app=$(ensure_done "$app")
           echo "// built $(date -u)" > scripts/app_ads.js
           echo "$app" >> scripts/app_ads.js
 
-          # ===== 3. 中文规则 =====
+          echo "=== Anti-AD Rules ==="
           ad=$(fetch https://raw.githubusercontent.com/privacy-protection-tools/anti-AD/master/anti-ad-surge.txt)
           is_html "$ad" && exit 1
           echo "# built $(date -u)" > rules/anti-ad.txt
           echo "$ad" >> rules/anti-ad.txt
 
-          # ===== 4. 全球规则 =====
-          hz=$(fetch https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/pro.txt)
+          echo "=== Hagezi (convert to domain list) ==="
+          hz=$(fetch https://raw.githubusercontent.com/hagezi/dns-blocklists/main/hosts/pro.txt)
           is_html "$hz" && exit 1
+
+          # 转换 hosts → DOMAIN-SUFFIX
           echo "# built $(date -u)" > rules/hagezi.txt
-          echo "$hz" >> rules/hagezi.txt
+          echo "$hz" | awk '/^0.0.0.0/ {print "DOMAIN-SUFFIX,"$2}' >> rules/hagezi.txt
 
       - name: Commit
         run: |
