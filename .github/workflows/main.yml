@@ -1,4 +1,4 @@
-name: Script Factory
+name: Script Factory (Upstream Sync)
 
 on:
   workflow_dispatch:
@@ -12,25 +12,63 @@ jobs:
       contents: write
 
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Build Scripts
+      - name: Fetch + Clean + Build
+        shell: bash
         run: |
+          set -euo pipefail
           mkdir -p scripts
 
-          for f in youtube.js global_ads.js; do
-            echo "Processing $f"
+          # ===== 外部脚本源（你可以随时换）=====
+          declare -A URLS=(
+            ["youtube.js"]="https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/script/youtube/youtube.js"
+            ["global_ads.js"]="https://raw.githubusercontent.com/privacy-protection-tools/anti-AD/master/anti-ad-surge.txt"
+          )
 
-            curl -fL https://raw.githubusercontent.com/${{ github.repository }}/main/sources/$f -o scripts/$f
+          download() {
+            curl -fL --retry 5 --retry-delay 3 --connect-timeout 20 "$1"
+          }
 
-            if grep -qi "<html" scripts/$f; then
-              echo "ERROR: got HTML"
+          validate_js() {
+            # 不能是HTML
+            if echo "$1" | grep -qiE "<!doctype html|<html|<script"; then
+              return 1
+            fi
+            return 0
+          }
+
+          clean_script() {
+            sed -E \
+              -e 's/\$httpClient\.(post|get|put)/console.log/g' \
+              -e 's/fetch\s*\(/console.log(/g' \
+              -e 's/axios\./console.log/g'
+          }
+
+          for name in "${!URLS[@]}"; do
+            echo "Processing $name"
+            content="$(download "${URLS[$name]}")"
+
+            if ! validate_js "$content"; then
+              echo "ERROR: $name is HTML or invalid"
               exit 1
             fi
 
-            sed -i 's/\$httpClient/console.log/g' scripts/$f
+            # ===== 清洗处理 =====
+            content="$(echo "$content" | clean_script)"
 
-            echo "// built at $(date)" | cat - scripts/$f > tmp && mv tmp scripts/$f
+            # ===== 包装（防止脚本不规范）=====
+            if [[ "$content" != *"\$done"* ]]; then
+              content="(function(){try{${content};\$done({});}catch(e){\$done({});}})();"
+            fi
+
+            # ===== 写入 =====
+            {
+              echo "// built at $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+              echo "$content"
+            } > "scripts/$name"
+
           done
 
       - name: Commit
@@ -38,5 +76,5 @@ jobs:
           git config user.name "bot"
           git config user.email "bot@users.noreply.github.com"
           git add scripts/*
-          git commit -m "build" || exit 0
+          git commit -m "sync upstream $(date -u)" || exit 0
           git push
