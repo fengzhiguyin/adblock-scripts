@@ -3,7 +3,9 @@ name: Adblock Factory (B Mode, Multi-Source, Safe)
 on:
   workflow_dispatch:
   schedule:
+    # 每天 UTC 16:00 (北京时间 00:00) 触发
     - cron: '0 16 * * *'
+  workflow_call: # 允许被其他工作流复用
 
 concurrency:
   group: adblock-factory
@@ -12,26 +14,36 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 15 # 设置超时时间，防止卡死消耗 Actions 额度
     permissions:
       contents: write
 
     steps:
-      - uses: actions/checkout@v4
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1 # 浅克隆，加快拉取速度
 
-      - name: Setup Node
+      - name: 配置 Node.js 环境
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      - name: Build (rules + scripts)
+      - name: 构建规则与脚本 (Build rules + scripts)
         shell: bash
         run: |
           set -euo pipefail
           shopt -s nullglob
 
+          # 初始化目录
           mkdir -p scripts rules reports build
 
           NOW="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+          echo "Build started at: $NOW"
+
+          # ==========================================
+          # 核心函数定义
+          # ==========================================
 
           fetch_one() {
             local url content code
@@ -40,6 +52,7 @@ jobs:
               content="$(curl -fsSL --retry 5 --retry-delay 3 --connect-timeout 20 "$url" 2>/dev/null)"
               code=$?
               set -e
+              # 验证 HTTP 状态码并过滤掉返回 HTML 错误页的情况
               if [ "$code" -eq 0 ] && [ -n "$content" ] && ! printf '%s' "$content" | grep -qiE '<!doctype html|<html'; then
                 printf '%s' "$content"
                 return 0
@@ -55,12 +68,14 @@ jobs:
                 line=trim($0)
                 if (line=="" || line ~ /^!/ || line ~ /^#/) next
 
+                # 保留已知类型的规则
                 if (line ~ /^(DOMAIN|DOMAIN-SUFFIX|DOMAIN-KEYWORD|IP-CIDR|IP-CIDR6|GEOIP),/) {
                   sub(/,(REJECT|DIRECT|PROXY|REJECT-TINYGIF)$/,"",line)
                   print line
                   next
                 }
 
+                # 转换 Adblock Plus || 语法为 DOMAIN-SUFFIX
                 if (line ~ /^\|\|/) {
                   gsub(/^\|\|/,"",line)
                   gsub(/\^.*$/,"",line)
@@ -68,12 +83,14 @@ jobs:
                   next
                 }
 
+                # 提取 hosts 格式中的域名
                 if (line ~ /^[0-9.]+[ \t]+[A-Za-z0-9.-]+$/) {
                   split(line,a,/[ \t]+/)
                   if (a[2] != "") print "DOMAIN-SUFFIX," a[2]
                   next
                 }
 
+                # 纯域名直接转换为 DOMAIN-SUFFIX
                 if (line ~ /^[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/) {
                   print "DOMAIN-SUFFIX," line
                 }
@@ -113,27 +130,28 @@ jobs:
           }
 
           prepend_stubs() {
-            printf '%s\n' \
-'/* auto-sanitized by GitHub Actions */' \
-'function __blocked_httpClient__() { throw new Error("blocked external request"); }' \
-'function __blocked_task_fetch__() { throw new Error("blocked external request"); }' \
-'function __blocked_GM_xmlhttpRequest__() { throw new Error("blocked external request"); }' \
-'function __blocked_fetch__() { throw new Error("blocked external request"); }' \
-'function __blocked_eval__() { throw new Error("blocked dynamic execution"); }' \
-'function __blocked_Function__() { throw new Error("blocked dynamic execution"); }' \
-'function __blocked_importScripts__() { throw new Error("blocked importScripts"); }' \
-'function __blocked_axios__() { throw new Error("blocked axios"); }' \
-'__blocked_axios__.get = function() { throw new Error("blocked axios"); };' \
-'__blocked_axios__.post = function() { throw new Error("blocked axios"); };' \
-'__blocked_axios__.put = function() { throw new Error("blocked axios"); };' \
-'__blocked_axios__.delete = function() { throw new Error("blocked axios"); };' \
-'__blocked_axios__.patch = function() { throw new Error("blocked axios"); };' \
-'__blocked_axios__.request = function() { throw new Error("blocked axios"); };' \
-'__blocked_axios__.head = function() { throw new Error("blocked axios"); };' \
-'__blocked_axios__.options = function() { throw new Error("blocked axios"); };' \
-'__blocked_axios__.create = function() { throw new Error("blocked axios"); };' \
-'class __blocked_WebSocket__ { constructor() { throw new Error("blocked WebSocket"); } }' \
-'class __blocked_XMLHttpRequest__ { constructor() { throw new Error("blocked XMLHttpRequest"); } }'
+            cat << 'EOF'
+/* auto-sanitized by GitHub Actions */
+function __blocked_httpClient__() { throw new Error("blocked external request"); }
+function __blocked_task_fetch__() { throw new Error("blocked external request"); }
+function __blocked_GM_xmlhttpRequest__() { throw new Error("blocked external request"); }
+function __blocked_fetch__() { throw new Error("blocked external request"); }
+function __blocked_eval__() { throw new Error("blocked dynamic execution"); }
+function __blocked_Function__() { throw new Error("blocked dynamic execution"); }
+function __blocked_importScripts__() { throw new Error("blocked importScripts"); }
+function __blocked_axios__() { throw new Error("blocked axios"); }
+__blocked_axios__.get = function() { throw new Error("blocked axios"); };
+__blocked_axios__.post = function() { throw new Error("blocked axios"); };
+__blocked_axios__.put = function() { throw new Error("blocked axios"); };
+__blocked_axios__.delete = function() { throw new Error("blocked axios"); };
+__blocked_axios__.patch = function() { throw new Error("blocked axios"); };
+__blocked_axios__.request = function() { throw new Error("blocked axios"); };
+__blocked_axios__.head = function() { throw new Error("blocked axios"); };
+__blocked_axios__.options = function() { throw new Error("blocked axios"); };
+__blocked_axios__.create = function() { throw new Error("blocked axios"); };
+class __blocked_WebSocket__ { constructor() { throw new Error("blocked WebSocket"); } }
+class __blocked_XMLHttpRequest__ { constructor() { throw new Error("blocked XMLHttpRequest"); } }
+EOF
           }
 
           build_script() {
@@ -141,6 +159,7 @@ jobs:
             shift
             local content tmp
 
+            echo "Building script: $out"
             if content="$(fetch_one "$@")"; then
               tmp="$(mktemp)"
               printf '%s\n' "$content" | sanitize_js > "$tmp"
@@ -153,124 +172,141 @@ jobs:
 
               rm -f "$tmp"
             else
+              echo "Warning: Failed to fetch script for $out. Using fallback."
               printf '%s\n' '/* fallback safe script */' '$done({});' > "$out"
             fi
           }
 
-          echo "=== scripts ==="
-          build_script scripts/startup.js \
-            "https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/script/startup/startup.js"
+          # ==========================================
+          # 脚本抓取与清理
+          # ==========================================
+          echo "=== Processing Scripts ==="
+          build_script scripts/startup.js "https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/script/startup/startup.js"
+          build_script scripts/app_ads.js "https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/script/advertising/advertising.js"
 
-          build_script scripts/app_ads.js \
-            "https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/script/advertising/advertising.js"
+          # ==========================================
+          # 规则抓取 (必要规则)
+          # ==========================================
+          echo "=== Processing Required Rules ==="
+          if anti_ad="$(fetch_one https://raw.githubusercontent.com/privacy-protection-tools/anti-AD/master/anti-ad-surge.txt)"; then
+            printf '%s\n' "$anti_ad" | normalize_rules | awk 'NF && !seen[$0]++' > rules/anti-ad.txt
+          else
+            echo "ERROR: anti-AD unavailable" >&2; exit 1
+          fi
 
-          echo "=== rules required ==="
-          anti_ad="$(fetch_one https://raw.githubusercontent.com/privacy-protection-tools/anti-AD/master/anti-ad-surge.txt)" || {
-            echo "ERROR: anti-AD unavailable"
-            exit 1
-          }
-          printf '%s\n' "$anti_ad" | normalize_rules | awk 'NF && !seen[$0]++' > rules/anti-ad.txt
+          if hagezi="$(fetch_one https://raw.githubusercontent.com/hagezi/dns-blocklists/main/hosts/pro.plus.txt)"; then
+            printf '%s\n' "$hagezi" | normalize_rules | awk 'NF && !seen[$0]++' > rules/hagezi.txt
+          else
+            echo "ERROR: Hagezi unavailable" >&2; exit 1
+          fi
 
-          hagezi="$(fetch_one https://raw.githubusercontent.com/hagezi/dns-blocklists/main/hosts/pro.plus.txt)" || {
-            echo "ERROR: Hagezi unavailable"
-            exit 1
-          }
-          printf '%s\n' "$hagezi" | normalize_rules | awk 'NF && !seen[$0]++' > rules/hagezi.txt
-
-          echo "=== rules optional ==="
+          # ==========================================
+          # 规则抓取 (可选规则)
+          # ==========================================
+          echo "=== Processing Optional Rules ==="
           if limbo="$(fetch_one https://raw.githubusercontent.com/limbopro/Adblock4limbo/main/Adblock4limbo.list)"; then
             printf '%s\n' "$limbo" | normalize_rules | awk 'NF && !seen[$0]++' > rules/limbo.txt
           else
+            echo "Warning: limbo list unavailable, generating empty file."
             : > rules/limbo.txt
           fi
 
           if johnshall="$(fetch_one https://raw.githubusercontent.com/Johnshall/Shadowrocket-ADBlock-Rules-Forever/release/sr_cnip.conf)"; then
             printf '%s\n' "$johnshall" | extract_johnshall_rejects | normalize_rules | awk 'NF && !seen[$0]++' > rules/johnshall.txt
           else
+            echo "Warning: johnshall rules unavailable, generating empty file."
             : > rules/johnshall.txt
           fi
 
           if adguard="$(fetch_one https://raw.githubusercontent.com/AdguardTeam/AdGuardSDNSFilter/master/Filters/filter.txt)"; then
             printf '%s\n' "$adguard" | normalize_rules | awk 'NF && !seen[$0]++' > rules/adguard.txt
           else
+            echo "Warning: adguard filter unavailable, generating empty file."
             : > rules/adguard.txt
           fi
 
-          echo "=== merge ==="
-          : > rules/ads_merged.txt
-          for f in rules/*.txt; do
-            [ "$(basename "$f")" = "ads_merged.txt" ] && continue
-            [ -s "$f" ] || continue
-            cat "$f" >> rules/ads_merged.txt
-            printf '\n' >> rules/ads_merged.txt
-          done
-          awk 'NF && !seen[$0]++' rules/ads_merged.txt > rules/ads_merged.tmp
+          # ==========================================
+          # 规则合并与去重优化
+          # ==========================================
+          echo "=== Merging Rules ==="
+          # 使用 find 一次性将所有 txt 喂给 awk 进行全局去重，避免 bash 循环造成的性能损耗
+          find rules -maxdepth 1 -name "*.txt" ! -name "ads_merged.txt" -exec cat {} + | \
+            awk 'NF && !seen[$0]++' > rules/ads_merged.tmp
           mv rules/ads_merged.tmp rules/ads_merged.txt
 
-          echo "=== audit ==="
+          # ==========================================
+          # 安全审计与验证
+          # ==========================================
+          echo "=== Audit ==="
           : > reports/script_scan.txt
           : > reports/rule_scan.txt
 
           if grep -RInE '\$httpClient\.|\$task\.fetch|\bGM_xmlhttpRequest\s*\(|\bfetch\s*\(|\baxios\.|\baxios\s*\(|\beval\s*\(|\bFunction\s*\(|\bimportScripts\s*\(|\bnew\s+WebSocket\s*\(|\bnew\s+XMLHttpRequest\s*\(' scripts/*.js > reports/script_scan.txt; then
-            echo "Script high-risk patterns found:"
-            cat reports/script_scan.txt
+            echo "Script high-risk patterns found:" >&2
+            cat reports/script_scan.txt >&2
             exit 1
           fi
 
           if grep -RInE 'https?://|<!doctype html|<html' rules/*.txt > reports/rule_scan.txt; then
-            echo "Invalid content found in rules:"
-            cat reports/rule_scan.txt
+            echo "Invalid content found in rules:" >&2
+            cat reports/rule_scan.txt >&2
             exit 1
           fi
 
+          # 验证 JS 语法有效性
           for f in scripts/*.js; do
             node --check "$f"
           done
 
-          [ -s scripts/startup.js ] || exit 1
-          [ -s scripts/app_ads.js ] || exit 1
-          [ -s rules/anti-ad.txt ] || exit 1
-          [ -s rules/hagezi.txt ] || exit 1
-          [ -s rules/ads_merged.txt ] || exit 1
+          # 验证输出文件是否为空
+          [ -s scripts/startup.js ] || { echo "startup.js is empty" >&2; exit 1; }
+          [ -s scripts/app_ads.js ] || { echo "app_ads.js is empty" >&2; exit 1; }
+          [ -s rules/anti-ad.txt ] || { echo "anti-ad.txt is empty" >&2; exit 1; }
+          [ -s rules/hagezi.txt ] || { echo "hagezi.txt is empty" >&2; exit 1; }
+          [ -s rules/ads_merged.txt ] || { echo "ads_merged.txt is empty" >&2; exit 1; }
 
-          python3 - <<'PY'
-import hashlib, json, os, time, glob
+          echo "DONE: Processing steps completed."
 
-def sha256(path):
-    h = hashlib.sha256()
-    with open(path, 'rb') as f:
-        for chunk in iter(lambda: f.read(8192), b''):
-            h.update(chunk)
-    return h.hexdigest()
+      - name: 生成 Manifest (替换 Python 为 Node.js)
+        shell: bash
+        run: |
+          node -e '
+          const crypto = require("crypto");
+          const fs = require("fs");
+          const path = require("path");
 
-manifest = {
-    "built_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-    "scripts": [],
-    "rules": [],
-}
+          const sha256 = (filePath) => {
+            const buffer = fs.readFileSync(filePath);
+            return crypto.createHash("sha256").update(buffer).digest("hex");
+          };
 
-for p in sorted(glob.glob("scripts/*.js")):
-    manifest["scripts"].append({
-        "path": p,
-        "sha256": sha256(p),
-        "bytes": os.path.getsize(p),
-    })
+          const manifest = {
+            built_at_utc: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
+            scripts: [],
+            rules: []
+          };
 
-for p in sorted(glob.glob("rules/*.txt")):
-    manifest["rules"].append({
-        "path": p,
-        "sha256": sha256(p),
-        "bytes": os.path.getsize(p),
-    })
+          ["scripts", "rules"].forEach(dir => {
+            if (fs.existsSync(dir)) {
+              fs.readdirSync(dir).sort().forEach(file => {
+                if (file.endsWith(".js") || file.endsWith(".txt")) {
+                  const fullPath = path.join(dir, file);
+                  manifest[dir].push({
+                    path: fullPath,
+                    sha256: sha256(fullPath),
+                    bytes: fs.statSync(fullPath).size
+                  });
+                }
+              });
+            }
+          });
 
-os.makedirs("build", exist_ok=True)
-with open("build/manifest.json", "w", encoding="utf-8") as f:
-    json.dump(manifest, f, ensure_ascii=False, indent=2)
-PY
+          fs.mkdirSync("build", { recursive: true });
+          fs.writeFileSync("build/manifest.json", JSON.stringify(manifest, null, 2));
+          console.log("Manifest generated successfully.");
+          '
 
-          echo "DONE"
-
-      - name: Upload audit artifacts
+      - name: 归档审计工件
         uses: actions/upload-artifact@v4
         with:
           name: adblock-audit
@@ -278,16 +314,16 @@ PY
             reports/
             build/manifest.json
 
-      - name: Commit
+      - name: 提交更新
         shell: bash
         run: |
           set -euo pipefail
-          git config user.name "bot"
-          git config user.email "bot@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add scripts rules build
           if git diff --cached --quiet; then
-            echo "No changes"
+            echo "No changes detected, skipping commit."
             exit 0
           fi
-          git commit -m "update $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+          git commit -m "Auto-update rules and scripts: $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
           git push
