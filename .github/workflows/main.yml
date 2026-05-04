@@ -1,45 +1,47 @@
-name: Adblock Factory (B Mode, Multi-Source, Safe)
+name名称：Adblock Factory （B模式，多源，安全）   名字: Adblock Factory (B Mode, Multi-Source, Safe)
 
-on:
+on   :   在:
   workflow_dispatch:
-  schedule:
-    - cron: '0 16 * * *'
+  schedule   时间表:   时间表:
+    - - cron: ‘0 16 * * *’cron: '0 16 * * *'- - cron: ‘0 16 * * *’cron: '0 16 * * *'
 
-concurrency:
-  group: adblock-factory
-  cancel-in-progress: false
+concurrency   并发性::
+  group   组:adblock-factory: a   一个   一个   一个dblock-factory组：adblock-factory: adblock-factory
+  cancel-in-progresscancel-in-progress:假: falseCancel-in-progresscancel-in-progress: false
 
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
+jobs   工作:   工作:
+  build   构建:   构建:
+    runs-on   上运行:ubuntu-latest   运行在: ubuntu-latest
+    permissions   权限:   权限:
+      contents   内容:写   内容: write
 
-    steps:
-      - uses: actions/checkout@v4
+    steps   步骤:   步骤:
+      - -使用：actions/checkout@v4uses: actions/checkout@v4
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
+      -    —name：设置节点name: S   年代   年代   年代etup Node-    —name：设置节点name: Setup Node
+        uses用途:行动/ setup-node@v4   使用: actions/setup-node@v4
+        with   :   与:
+          node-version   节点信息:“20”: '20'
 
-      - name: Build (rules + scripts)
-        shell: bash
-        run: |
+      - - name   名字: Build（规则脚本）name: Build (rules + scripts)
+        shell   bash shellShell bash Shell:   壳牌: bash
+        run   运行:|   运行: |
           set -euo pipefail
-          shopt -s nullglob
+          shopt -s nullglob   Shopt -s nullglob   Shopt -s nullglob
 
-          mkdir -p scripts rules reports build
+          mkdir -p scripts rules reports buildMkdir -p scripts规则报告构建Mkdir -p scripts规则报告构建
 
-          NOW="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+          NOW="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"现在=“$(日期- u“Y % - % - % dT % H: % m: % SZ")“;现在=“$(日期- u“Y % - % - % dT % H: % m: % SZ")“;
 
           fetch_one() {
-            local url content code
-            for url in "$@"; do
-              set +e
-              content="$(curl -fsSL --retry 5 --retry-delay 3 --connect-timeout 20 "$url" 2>/dev/null)"
-              code=$?
-              set -e
+            local url content code   本地url内容代码   本地url内容代码
+            for url in "$@"; do$@"；做$@"；做
+              set +e   集e   集e
+              content="$(curl -fsSL --retry 5 --retry-delay 3 --connect-timeout 20 "$url" 2>/dev/null)"$(curl -fsSL——retry 5——retry-delay 3——connect-timeout 20 "$url" 2>/dev$(curl -fsSL——retry 5——retry-delay 3——connect-timeout 20 "$url" 2>/dev
+ull)"；   ull)"；   “;
+ull)"；   ull)"；
+              code=$?   代码= $ ?   代码= $ ?
+              set -e   设置- e   设置- e
               if [ "$code" -eq 0 ] && [ -n "$content" ] && ! printf '%s' "$content" | grep -qiE '<!doctype html|<html'; then
                 printf '%s' "$content"
                 return 0
@@ -89,13 +91,13 @@ jobs:
                 line=$0
                 gsub(/\r/,"",line)
                 sub(/^[ \t]+/,"",line)
-                sub(/[ \t]+$/,"",line)
+                sub(/[ \t]+$/,"",line)   返回1
                 if (line=="" || line ~ /^#/ || line ~ /^!/) next
                 if (line ~ /(REJECT|reject|REJECT-TINYGIF)/) print line
               }'
           }
 
-          sanitize_js() {
+          sanitize_js()    返回1{
             perl -0pe '
               s#https?://[^[:space:]"<>]+#https://blocked.invalid#g;
 
@@ -104,7 +106,7 @@ jobs:
               s/\bGM_xmlhttpRequest\s*\(/__blocked_GM_xmlhttpRequest__(/g;
               s/\bfetch\s*\(/__blocked_fetch__(/g;
               s/\baxios\s*\(/__blocked_axios__(/g;
-              s/\baxios\./__blocked_axios__./g;
+              s/\baxios\./__blocked_axios__./g;s / \ baxios \ / __blocked_axios__. / g;
               s/\beval\s*\(/__blocked_eval__(/g;
               s/\bFunction\s*\(/__blocked_Function__(/g;
               s/\bimportScripts\s*\(/__blocked_importScripts__(/g;
@@ -113,8 +115,8 @@ jobs:
             '
           }
 
-          prepend_stubs() {
-            cat <<'EOF'
+prepend_stubs() {
+cat <<'EOF'
 /* auto-sanitized by GitHub Actions */
 function __blocked_httpClient__() { throw new Error("blocked external request: $httpClient"); }
 function __blocked_task_fetch__() { throw new Error("blocked external request: $task.fetch"); }
