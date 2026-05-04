@@ -1,3 +1,34 @@
+主要链接直接复制到配置中使用：
+### 🟢 规则集链接 (Rules)
+这些链接用于屏蔽域名和 IP，推荐优先使用“终极合并版”。
+ * **🌟 终极合并去重版（推荐）：**
+   https://raw.githubusercontent.com/fengzhiguyin/adblock-scripts/main/rules/ads_merged.txt
+ * **Anti-AD 标准版：**
+   https://raw.githubusercontent.com/fengzhiguyin/adblock-scripts/main/rules/anti-ad.txt
+ * **Hagezi Pro Plus 版：**
+   https://raw.githubusercontent.com/fengzhiguyin/adblock-scripts/main/rules/hagezi.txt
+ * **Adblock4limbo 规则：**
+   https://raw.githubusercontent.com/fengzhiguyin/adblock-scripts/main/rules/limbo.txt
+ * **Johnshall 规则：**
+   https://raw.githubusercontent.com/fengzhiguyin/adblock-scripts/main/rules/johnshall.txt
+ * **AdGuard DNS 过滤版：**
+   https://raw.githubusercontent.com/fengzhiguyin/adblock-scripts/main/rules/adguard.txt
+### 🔵 净化脚本链接 (Scripts)
+这些是已经过 **B Mode 安全清洗**，阻断了所有外部请求和动态执行的安全脚本。
+ * **开屏广告去除（Startup）：**
+   https://raw.githubusercontent.com/fengzhiguyin/adblock-scripts/main/scripts/startup.js
+ * **App 内部广告净化（App Ads）：**
+   https://raw.githubusercontent.com/fengzhiguyin/adblock-scripts/main/scripts/app_ads.js
+ * **YouTube 视频去广告（YouTube）：**
+   https://raw.githubusercontent.com/fengzhiguyin/adblock-scripts/main/scripts/youtube.js
+ * **全局广告拦截增强（Global Ads）：**
+   https://raw.githubusercontent.com/fengzhiguyin/adblock-scripts/main/scripts/global_ads.js
+### ⚪ 系统清单文件
+用于校验版本和文件指纹。
+ * **构建清单 (Manifest)：**
+   https://raw.githubusercontent.com/fengzhiguyin/adblock-scripts/main/build/manifest.json
+
+
 # adblock-scripts
 # 🛡️ Adblock Factory (B Mode, Multi-Source, Safe)
 
@@ -55,8 +86,39 @@
 ```ini
 [Rule]
 # 引用合并版去广告规则
-RULE-SET, [https://raw.githubusercontent.com/你的用户名/你的仓库名/main/rules/ads_merged.txt](https://raw.githubusercontent.com/你的用户名/你的仓库名/main/rules/ads_merged.txt), REJECT
+RULE-SET, [https://raw.githubusercontent.com/fengzhiguyin/adblock-scripts/main/rules/ads_merged.txt](https://raw.githubusercontent.com/fengzhiguyin/adblock-scripts/main/rules/ads_merged.txt), REJECT
 
 [Script]
 # 引用经过清洗的安全脚本
-去除APP启动广告 = type=http-response,pattern=^https?:\/\/.*\.com\/.*,requires-body=1,max-size=131072,script-path=[https://raw.githubusercontent.com/你的用户名/你的仓库名/main/scripts/startup.js](https://raw.githubusercontent.com/你的用户名/你的仓库名/main/scripts/startup.js)
+去除APP启动广告 = type=http-response,pattern=^https?:\/\/.*\.com\/.*,requires-body=1,max-size=131072,script-path=[https://raw.githubusercontent.com/fengzhiguyin/adblock-scripts/main/scripts/startup.js](https://raw.githubusercontent.com/fengzhiguyin/adblock-scripts/main/scripts/startup.js)
+
+直接复制到配置中使用：
+### 🟢 规则集链接 (Rules)
+这些链接用于屏蔽域名和 IP，推荐优先使用“终极合并版”。
+ * **🌟 终极合并去重版（推荐）：**
+   https://raw.githubusercontent.com/fengzhiguyin/adblock-scripts/main/rules/ads_merged.txt
+ * **Anti-AD 标准版：**
+   https://raw.githubusercontent.com/fengzhiguyin/adblock-scripts/main/rules/anti-ad.txt
+ * **Hagezi Pro Plus 版：**
+   https://raw.githubusercontent.com/fengzhiguyin/adblock-scripts/main/rules/hagezi.txt
+ * **Adblock4limbo 规则：**
+   https://raw.githubusercontent.com/fengzhiguyin/adblock-scripts/main/rules/limbo.txt
+ * **Johnshall 规则：**
+   https://raw.githubusercontent.com/fengzhiguyin/adblock-scripts/main/rules/johnshall.txt
+ * **AdGuard DNS 过滤版：**
+   https://raw.githubusercontent.com/fengzhiguyin/adblock-scripts/main/rules/adguard.txt
+### 🔵 净化脚本链接 (Scripts)
+这些是已经过 **B Mode 安全清洗**，阻断了所有外部请求和动态执行的安全脚本。
+ * **开屏广告去除（Startup）：**
+   https://raw.githubusercontent.com/fengzhiguyin/adblock-scripts/main/scripts/startup.js
+ * **App 内部广告净化（App Ads）：**
+   https://raw.githubusercontent.com/fengzhiguyin/adblock-scripts/main/scripts/app_ads.js
+ * **YouTube 视频去广告（YouTube）：**
+   https://raw.githubusercontent.com/fengzhiguyin/adblock-scripts/main/scripts/youtube.js
+ * **全局广告拦截增强（Global Ads）：**
+   https://raw.githubusercontent.com/fengzhiguyin/adblock-scripts/main/scripts/global_ads.js
+### ⚪ 系统清单文件
+用于校验版本和文件指纹。
+ * **构建清单 (Manifest)：**
+   https://raw.githubusercontent.com/fengzhiguyin/adblock-scripts/main/build/manifest.json
+
