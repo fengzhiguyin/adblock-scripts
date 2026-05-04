@@ -1,5 +1,5 @@
 {
-  "built_at_utc": "2026-05-04T06:23:13Z",
+  "built_at_utc": "2026-05-04T06:53:00Z",
   "scripts": [
     {
       "path": "scripts/app_ads.js",
@@ -8,18 +8,18 @@
     },
     {
       "path": "scripts/global_ads.js",
-      "sha256": "e6d0fe497d3e171c18c504bd408ac2d3390a8cf863556ad8388936cf3c092e5a",
-      "bytes": 350
+      "sha256": "967e7f5fb70a91990b68b62ac5904a02a23d94232496deb15cc5fdb3dbe65bf8",
+      "bytes": 38
     },
     {
       "path": "scripts/startup.js",
-      "sha256": "32aaeeab9f17be331c1650c5816ea57babf2413ccbb61d203f09abb87115c709",
+      "sha256": "b7e2940b8da893d2a0f35c590fdd5b80bda2f1d5e259e0c036ab21140fcbcc79",
       "bytes": 13726
     },
     {
       "path": "scripts/youtube.js",
-      "sha256": "21e2ff7b44a92249bcd7ad156ee66e62f632016cfc8cd5282e742da9256a38e5",
-      "bytes": 507
+      "sha256": "967e7f5fb70a91990b68b62ac5904a02a23d94232496deb15cc5fdb3dbe65bf8",
+      "bytes": 38
     }
   ],
   "rules": [
