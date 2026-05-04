@@ -5,6 +5,10 @@ on:
   schedule:
     - cron: '0 16 * * *'
 
+concurrency:
+  group: adblock-factory
+  cancel-in-progress: false
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -14,12 +18,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
       - name: Build (rules + scripts)
         shell: bash
         run: |
           set -euo pipefail
+          shopt -s nullglob
 
-          mkdir -p scripts rules
+          mkdir -p scripts rules reports build
+
+          NOW="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 
           fetch_one() {
             local url content code
@@ -34,17 +46,6 @@ jobs:
               fi
             done
             return 1
-          }
-
-          is_html() {
-            printf '%s' "$1" | grep -qiE '<!doctype html|<html'
-          }
-
-          sanitize_js() {
-            sed -E \
-              -e 's/\$httpClient\.(get|post|put|delete)/console.log/g' \
-              -e 's/\bfetch\s*\(/console.log(/g' \
-              -e 's/\baxios\.[a-zA-Z]+\s*\(/console.log(/g'
           }
 
           normalize_rules() {
@@ -94,18 +95,70 @@ jobs:
               }'
           }
 
+          sanitize_js() {
+            perl -0pe '
+              s#https?://[^[:space:]"<>]+#https://blocked.invalid#g;
+
+              s/\$httpClient\.(get|post|put|delete|head|options|patch|request)\s*\(/__blocked_httpClient__(/g;
+              s/\$task\.fetch\s*\(/__blocked_task_fetch__(/g;
+              s/\bGM_xmlhttpRequest\s*\(/__blocked_GM_xmlhttpRequest__(/g;
+              s/\bfetch\s*\(/__blocked_fetch__(/g;
+              s/\baxios\s*\(/__blocked_axios__(/g;
+              s/\baxios\./__blocked_axios__./g;
+              s/\beval\s*\(/__blocked_eval__(/g;
+              s/\bFunction\s*\(/__blocked_Function__(/g;
+              s/\bimportScripts\s*\(/__blocked_importScripts__(/g;
+              s/\bnew\s+WebSocket\s*\(/new __blocked_WebSocket__(/g;
+              s/\bnew\s+XMLHttpRequest\s*\(/new __blocked_XMLHttpRequest__(/g;
+            '
+          }
+
+          prepend_stubs() {
+            cat <<'EOF'
+/* auto-sanitized by GitHub Actions */
+function __blocked_httpClient__() { throw new Error("blocked external request: $httpClient"); }
+function __blocked_task_fetch__() { throw new Error("blocked external request: $task.fetch"); }
+function __blocked_GM_xmlhttpRequest__() { throw new Error("blocked external request: GM_xmlhttpRequest"); }
+function __blocked_fetch__() { throw new Error("blocked external request: fetch"); }
+function __blocked_eval__() { throw new Error("blocked dynamic execution: eval"); }
+function __blocked_Function__() { throw new Error("blocked dynamic execution: Function"); }
+function __blocked_importScripts__() { throw new Error("blocked importScripts"); }
+function __blocked_axios__() { throw new Error("blocked axios"); }
+__blocked_axios__.get = function() { throw new Error("blocked axios"); };
+__blocked_axios__.post = function() { throw new Error("blocked axios"); };
+__blocked_axios__.put = function() { throw new Error("blocked axios"); };
+__blocked_axios__.delete = function() { throw new Error("blocked axios"); };
+__blocked_axios__.patch = function() { throw new Error("blocked axios"); };
+__blocked_axios__.request = function() { throw new Error("blocked axios"); };
+__blocked_axios__.head = function() { throw new Error("blocked axios"); };
+__blocked_axios__.options = function() { throw new Error("blocked axios"); };
+__blocked_axios__.create = function() { throw new Error("blocked axios"); };
+class __blocked_WebSocket__ { constructor() { throw new Error("blocked WebSocket"); } }
+class __blocked_XMLHttpRequest__ { constructor() { throw new Error("blocked XMLHttpRequest"); } }
+EOF
+          }
+
           build_script() {
             local out="$1"
             shift
-            local content
+            local content tmp
+
             if content="$(fetch_one "$@")"; then
-              content="$(printf '%s' "$content" | sanitize_js)"
+              tmp="$(mktemp)"
+              printf '%s\n' "$content" | sanitize_js > "$tmp"
+
               {
-                printf '// built at %s\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-                printf '%s\n' "$content"
+                printf '// built at %s\n' "$NOW"
+                prepend_stubs
+                cat "$tmp"
               } > "$out"
+
+              rm -f "$tmp"
             else
-              printf '%s\n' '// fallback safe script' '$done({});' > "$out"
+              cat > "$out" <<'EOF'
+/* fallback safe script */
+$done({});
+EOF
             fi
           }
 
@@ -159,26 +212,100 @@ jobs:
           awk 'NF && !seen[$0]++' rules/ads_merged.txt > rules/ads_merged.tmp
           mv rules/ads_merged.tmp rules/ads_merged.txt
 
-          echo "=== verify ==="
+          echo "=== audit ==="
+          : > reports/script_scan.txt
+          : > reports/script_urls.txt
+          : > reports/rule_scan.txt
+
+          # 脚本中不允许残留联网/动态执行特征
+          if grep -RInE '\$httpClient\.|\$task\.fetch|\bGM_xmlhttpRequest\s*\(|\bfetch\s*\(|\baxios\.|\baxios\s*\(|\beval\s*\(|\bFunction\s*\(|\bimportScripts\s*\(|\bnew\s+WebSocket\s*\(|\bnew\s+XMLHttpRequest\s*\(' scripts/*.js > reports/script_scan.txt; then
+            echo "Script high-risk patterns found:"
+            cat reports/script_scan.txt
+            exit 1
+          fi
+
+          # 脚本中不允许残留外部 URL
+          if grep -RInE 'https?://' scripts/*.js > reports/script_urls.txt; then
+            echo "External URLs found in scripts:"
+            cat reports/script_urls.txt
+            exit 1
+          fi
+
+          # 规则中不允许残留 HTML/外链
+          if grep -RInE 'https?://|<!doctype html|<html' rules/*.txt > reports/rule_scan.txt; then
+            echo "Invalid content found in rules:"
+            cat reports/rule_scan.txt
+            exit 1
+          fi
+
+          # 语法校验
+          for f in scripts/*.js; do
+            node --check "$f"
+          done
+
+          # 基础完整性
           [ -s scripts/startup.js ] || exit 1
           [ -s scripts/app_ads.js ] || exit 1
           [ -s rules/anti-ad.txt ] || exit 1
           [ -s rules/hagezi.txt ] || exit 1
           [ -s rules/ads_merged.txt ] || exit 1
 
-          for f in scripts/*.js rules/*.txt; do
-            if grep -qiE '<!doctype html|<html' "$f"; then
-              echo "HTML detected in $f"
-              exit 1
-            fi
-          done
+          # 生成 manifest（不影响 Shadowrocket 路径）
+          python3 - <<'PY'
+import hashlib, json, os, time, glob
 
-          echo "DONE"
+def sha256(path):
+    h = hashlib.sha256()
+    with open(path, 'rb') as f:
+        for chunk in iter(lambda: f.read(8192), b''):
+            h.update(chunk)
+    return h.hexdigest()
 
-      - name: Commit
-        run: |
-          git config user.name "bot"
-          git config user.email "bot@users.noreply.github.com"
-          git add scripts rules
-          git commit -m "update $(date -u +"%Y-%m-%dT%H:%M:%SZ")" || exit 0
+manifest = {
+    "built_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    "scripts": [],
+    "rules": [],
+}
+
+for p in sorted(glob.glob("scripts/*.js")):
+    manifest["scripts"].append({
+        "path": p,   "path": p,
+        "sha256": sha256(p),   “sha256": sha256 (p),   ： sha256 (p)，
+        "bytes": os.path.getsize(p),"bytes": os.path.getsize(p),
+    })
+
+for p in sorted(glob.glob("rules/*.txt"   "rules/*.txt")):对于p在sorted（glob.glob("rules/*.txt"   "rules/*.txt")）中：
+    manifest["rules"].append({manifest["rules"   "rules"].append({
+        "path": p,   "path": p,
+        "sha256": sha256(p),   “sha256": sha256 (p),
+        "bytes": os.path.getsize(p),"bytes": os.path.getsize(p),
+    })
+
+os.makedirs("build", exist_ok=True)os.makedirs("build"   "build", exist_ok=True)
+with open("build/manifest.json", "w", encoding="utf-8") as f:使用open（"build/manifest.json", "w", encoding="utf-8"）作为f：
+    json.dump(manifest, f, ensure_ascii=False, indent=2)json。dump（manifest, f, ensure_ascii=False，缩进=2）
+PY
+
+          echo "DONE"   echo "DONE"
+
+      - name: Upload audit artifacts—name：上传审计构件
+        uses: actions/upload-artifact@v4用途:行动/ upload-artifact@v4
+        with:   :
+          name: adblock-audit   名称:adblock-audit
+          path: |   路径:|
+            reports/   报告/
+            build/manifest.json   构建/ manifest.json
+
+      - name: Commit   —name：提交
+        shell: bash   bash shell:
+        run: |   运行:|
+          set -euo pipefail
+          git config user.name "bot"Git配置user.name "bot"；
+          git config user.email "bot@users.noreply.github.com"Git配置用户。电子邮件“bot@users.noreply.github.com"
+          git add scripts rules buildGit添加脚本规则构建
+          if git diff --cached --quiet; then如果git diff——cached——quiet；然后
+            echo "No changes"   echo "No changes"
+            exit 0
+          fi
+          git commit -m "update $(date -u +"%Y-%m-%dT%H:%M:%SZ")"git commit - m“更新$(日期- u“Y % - % - % dT % H: % m: % SZ")“;
           git push
