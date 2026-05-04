@@ -178,6 +178,8 @@ jobs:
           echo "=== Processing Scripts ==="
           build_script scripts/startup.js "https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/script/startup/startup.js"
           build_script scripts/app_ads.js "https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/script/advertising/advertising.js"
+          build_script scripts/global_ads.js "https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/script/test/global.js"
+          build_script scripts/youtube.js "https://raw.githubusercontent.com/Maasea/sgmodule/master/Script/Youtube/youtube.js"
 
           # ==========================================
           # 规则抓取 (必要规则)
@@ -253,6 +255,9 @@ jobs:
 
           [ -s scripts/startup.js ] || { echo "startup.js is empty" >&2; exit 1; }
           [ -s scripts/app_ads.js ] || { echo "app_ads.js is empty" >&2; exit 1; }
+          [ -s scripts/global_ads.js ] || { echo "global_ads.js is empty" >&2; exit 1; }
+          [ -s scripts/youtube.js ] || { echo "youtube.js is empty" >&2; exit 1; }
+          
           [ -s rules/anti-ad.txt ] || { echo "anti-ad.txt is empty" >&2; exit 1; }
           [ -s rules/hagezi.txt ] || { echo "hagezi.txt is empty" >&2; exit 1; }
           [ -s rules/ads_merged.txt ] || { echo "ads_merged.txt is empty" >&2; exit 1; }
