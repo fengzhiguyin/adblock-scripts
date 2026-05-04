@@ -1,4 +1,24 @@
-// built at 2026-05-03T16:54:15Z
+// built at 2026-05-04T06:23:06Z
+/* auto-sanitized by GitHub Actions */
+function __blocked_httpClient__() { throw new Error("blocked external request"); }
+function __blocked_task_fetch__() { throw new Error("blocked external request"); }
+function __blocked_GM_xmlhttpRequest__() { throw new Error("blocked external request"); }
+function __blocked_fetch__() { throw new Error("blocked external request"); }
+function __blocked_eval__() { throw new Error("blocked dynamic execution"); }
+function __blocked_Function__() { throw new Error("blocked dynamic execution"); }
+function __blocked_importScripts__() { throw new Error("blocked importScripts"); }
+function __blocked_axios__() { throw new Error("blocked axios"); }
+__blocked_axios__.get = function() { throw new Error("blocked axios"); };
+__blocked_axios__.post = function() { throw new Error("blocked axios"); };
+__blocked_axios__.put = function() { throw new Error("blocked axios"); };
+__blocked_axios__.delete = function() { throw new Error("blocked axios"); };
+__blocked_axios__.patch = function() { throw new Error("blocked axios"); };
+__blocked_axios__.request = function() { throw new Error("blocked axios"); };
+__blocked_axios__.head = function() { throw new Error("blocked axios"); };
+__blocked_axios__.options = function() { throw new Error("blocked axios"); };
+__blocked_axios__.create = function() { throw new Error("blocked axios"); };
+class __blocked_WebSocket__ { constructor() { throw new Error("blocked WebSocket"); } }
+class __blocked_XMLHttpRequest__ { constructor() { throw new Error("blocked XMLHttpRequest"); } }
 const scriptName = "去除APP启动广告";
 const $ = MagicJS(scriptName, "INFO");
 
@@ -166,9 +186,9 @@ const $ = MagicJS(scriptName, "INFO");
                 "present_flag": 1,
                 "banner": {
                   "banner_id": "1861064161258799417",
-                  "image": "http://qnplus-banner.glb.qnniu.com/banner_1636700135",
+                  "image": "https://blocked.invalid",
                   "image_type": 1,
-                  "jump_link": "https://app-h5.yolanda.hk/redirect_center.html?type=fascia_gun",
+                  "jump_link": "https://blocked.invalid",
                   "jump_type": 1,
                   "duration": 5,
                   "frequency": 1,
