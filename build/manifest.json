@@ -1,5 +1,5 @@
 {
-  "built_at_utc": "2026-05-18T17:55:56Z",
+  "built_at_utc": "2026-05-19T18:00:33Z",
   "scripts": [
     {
       "path": "scripts/app_ads.js",
@@ -13,7 +13,7 @@
     },
     {
       "path": "scripts/startup.js",
-      "sha256": "59d6eddc8c67a14c73b6699325770820b1c3252f2222450a00a70a0462b6c3f9",
+      "sha256": "6042f6f7f0fd0004603f6a0e57454443e7d1d2195f3a62d81b2cc9306c73ac8c",
       "bytes": 13726
     },
     {
@@ -30,8 +30,8 @@
     },
     {
       "path": "rules/ads_merged.txt",
-      "sha256": "c47dd0662d18f87257948c08807aab603e65050fadd7d94cbf1185bb29b6c6bb",
-      "bytes": 24799486
+      "sha256": "b4bbae9b99a68dda8453648c87c877087a3a112d1e566dc808415f359f54cad6",
+      "bytes": 24325052
     },
     {
       "path": "rules/anti-ad.txt",
@@ -40,8 +40,8 @@
     },
     {
       "path": "rules/hagezi.txt",
-      "sha256": "04db2f2516482b65ea11c36d0b79efb949816ece1e6753626b90938b07d901dc",
-      "bytes": 23330534
+      "sha256": "1ccf4866368911bec3eb4cb7f755e8b96328ee470a219ddaa18f4ae43a2cf61a",
+      "bytes": 22852956
     },
     {
       "path": "rules/johnshall.txt",
