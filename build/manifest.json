@@ -1,5 +1,5 @@
 {
-  "built_at_utc": "2026-05-25T17:29:28Z",
+  "built_at_utc": "2026-05-26T18:21:49Z",
   "scripts": [
     {
       "path": "scripts/app_ads.js",
@@ -13,7 +13,7 @@
     },
     {
       "path": "scripts/startup.js",
-      "sha256": "f98e58e3ea06d0ec5dd4559076834a936feca538626d735acb2ec8c802b03801",
+      "sha256": "06e80dc8d1c7e28eccceb4dca2f5247ed4d2dbac709bde25ef4089d23eb48dbc",
       "bytes": 13726
     },
     {
@@ -30,18 +30,18 @@
     },
     {
       "path": "rules/ads_merged.txt",
-      "sha256": "d78c12f687120a6300784ccc7bcf3dc32137dc1da0f2bb8cdb40849000e81cca",
-      "bytes": 25622648
+      "sha256": "f9c87cd7275892bb980335a2977e71cd8157d39c7ea69e0f53efeeba2a485c2f",
+      "bytes": 25766904
     },
     {
       "path": "rules/anti-ad.txt",
-      "sha256": "195010cbb592cef72b06a8d587fa2bf2f65275f2a00251131ef97c6ef418458b",
-      "bytes": 3502422
+      "sha256": "6ea220ca628cd4af254df90c3553d63fb97875a974ecf0614368b679243a5a61",
+      "bytes": 3508961
     },
     {
       "path": "rules/hagezi.txt",
-      "sha256": "9863b707a02140af0dbf9e4a36ee7fd8e9e41abc9f3c8b5df08fb035a5d608cb",
-      "bytes": 24175238
+      "sha256": "fe061b7a3a7ec4f3e5a0bab09668576cb740e197f859a1e2a54f4712837a1472",
+      "bytes": 24320110
     },
     {
       "path": "rules/johnshall.txt",
